@@ -26,9 +26,9 @@ public class TwitterStats {
     private static final HTableDescriptor TABLE_DESCRIPTOR = new HTableDescriptor(TableName.valueOf(TABLE_NAME_BYTES));
 
     // TODO, change to out
-    private static final String DATA_GLOB = "*.log";
+    private static final String DATA_GLOB = "*.out";
 
-    private static final String[] ALL_LANGUAE_LIST = {"all"};
+    private static final String[] ALL_LANGUAGE_LIST = {"all"};
 
     private static final byte[] TOP_HASH_TAG1_BYTES = Bytes.toBytes("topHashTag1");
     private static final byte[] TOP_HASH_TAG2_BYTES = Bytes.toBytes("topHashTag2");
@@ -52,6 +52,7 @@ public class TwitterStats {
         }
     }
 
+
     private static byte[] topHashTagFreqBytes(int i) {
         switch(i) {
             case 1:
@@ -66,6 +67,11 @@ public class TwitterStats {
     }
 
 
+    /**
+     * return output file name
+     * @param queryMode
+     * @return
+     */
     private static String getOutputFileName(String queryMode) {
         return "21_query" + queryMode + ".out";
     }
@@ -108,7 +114,6 @@ public class TwitterStats {
                 resWriter.write(strBuilder.toString());
                 resWriter.newLine();
             }
-
             resWriter.close();
         }
         catch (FileNotFoundException e) {
@@ -123,9 +128,6 @@ public class TwitterStats {
 
 
     public static void main(String[] args) {
-
-        System.out.println("Hello, HBase!");
-
         // empty arguments
         if(args.length < 1) {
             System.out.println("The arguments cannot be empty. Check the reference!");
@@ -139,24 +141,28 @@ public class TwitterStats {
         // mode 3, given time interval, find top N words among all languages.
         if(((mode.equals("1") || mode.equals("2")) && args.length >= 7) || (mode.equals("3") && args.length >= 6)) {
             String zkHost = args[1];
+            // TODO, remove after finishing development
             System.out.println("zkHost:" + zkHost);
             // TODO, use zkHost
 
             byte[] startTsBytes = Bytes.toBytes(args[2]);
+            // TODO, remove after finishing development
             System.out.println("startTimestamp:" + new String(startTsBytes, StandardCharsets.UTF_8));
 
             byte[] endTsBytes = Bytes.toBytes(args[3]);
+            // TODO, remove after finishing development
             System.out.println("endTimestamp:" + new String(endTsBytes, StandardCharsets.UTF_8));
 
             if(Bytes.toString(startTsBytes).compareTo(Bytes.toString(endTsBytes)) > 0) {
-                System.out.println("Star time cannot be later than end time.");
+                System.out.println("Start time cannot be later than end time.");
                 return;
             }
 
             final int n = Integer.valueOf(args[4]);
+            // TODO, remove after finishing development
             System.out.println("n:" + n);
 
-            String[] langList = mode.equals("3") ? ALL_LANGUAE_LIST : args[5].split(",");
+            String[] langList = mode.equals("3") ? ALL_LANGUAGE_LIST : args[5].split(",");
 
             // transform to List of byte[]
             ArrayList<byte[]> langBytesList = new ArrayList<>(langList.length);
@@ -166,49 +172,57 @@ public class TwitterStats {
                 streamTopKs.put(lang, new StreamTopK(n));
             }
 
+            // TODO, remove after finishing development
             System.out.println("langList:");
             for(byte[] langBytes : langBytesList) {
                 System.out.println(Bytes.toString(langBytes));
             }
 
             String outputFolder = mode.equals("3") ? args[5] : args[6];
+            // TODO, remove after finishing development
             System.out.println("outputFolder:" + outputFolder);
 
             try{
                 HConnection conn = HConnectionManager.createConnection(CONFIGURATION);
                 HTable table = new HTable(TableName.valueOf(TABLE_NAME_BYTES), conn);
 
-                Scan scan = new Scan(startTsBytes, endTsBytes);
-
-                if(!mode.equals("3")) {
-                    for(byte[] langBytes : langBytesList) {
-                        scan.addFamily(langBytes);
-                    }
-                }
-
-                ResultScanner resScanner = table.getScanner(scan);
-
                 try{
-                    for(Result res : resScanner) {
-                        NavigableMap<byte[], NavigableMap<byte[], byte[]>> cfColValMap = res.getNoVersionMap();
+                    Scan scan = new Scan(startTsBytes, endTsBytes);
+                    if(!mode.equals("3")) {
+                        for(byte[] langBytes : langBytesList) {
+                            scan.addFamily(langBytes);
+                        }
+                    }
 
-                        Set<byte[]> langBytesSet = cfColValMap.keySet();
-                        for(byte[] langBytes : langBytesSet) {
-                            for(int i = 0; i < 3; ++i) {
-                                String hashtag = Bytes.toString(cfColValMap.get(langBytes).get(topHashTagBytes(i + 1)));
-                                if(hashtag != null) {
-                                    // transform to string first and get int value later to avoid IllegalArgumentException
-                                    int freq = Integer.valueOf(Bytes.toString(cfColValMap.get(langBytes).get(topHashTagFreqBytes(i + 1))));
+                    ResultScanner resScanner = table.getScanner(scan);
 
-                                    StreamTopK streamTopK = mode.equals("3") ? streamTopKs.get(ALL_LANGUAE_LIST[0]) : streamTopKs.get(Bytes.toString(langBytes));
-                                    streamTopK.add(hashtag, freq);
+                    try{
+                        for(Result res : resScanner) {
+                            NavigableMap<byte[], NavigableMap<byte[], byte[]>> cfColValMap = res.getNoVersionMap();
+
+                            Set<byte[]> langBytesSet = cfColValMap.keySet();
+                            for(byte[] langBytes : langBytesSet) {
+                                for(int i = 0; i < 3; ++i) {
+                                    String hashtag = Bytes.toString(cfColValMap.get(langBytes).get(topHashTagBytes(i + 1)));
+                                    if(hashtag != null) {
+                                        // transform to string first and get int value later to avoid IllegalArgumentException
+                                        int freq = Integer.valueOf(Bytes.toString(cfColValMap.get(langBytes).get(topHashTagFreqBytes(i + 1))));
+
+                                        StreamTopK streamTopK = mode.equals("3") ? streamTopKs.get(ALL_LANGUAGE_LIST[0]) : streamTopKs.get(Bytes.toString(langBytes));
+                                        streamTopK.add(hashtag, freq);
+                                    }
                                 }
                             }
                         }
                     }
+                    finally {
+                        resScanner.close();
+                    }
                 }
                 finally {
-                    resScanner.close();
+                    if(table != null) {
+                        table.close();
+                    }
                 }
 
                 // write to files
@@ -216,7 +230,7 @@ public class TwitterStats {
                 for(String lang : streamTopKs.keySet()) {
                     dataToWrite.put(lang, streamTopKs.get(lang).topk());
 
-                    // TODO, remove after finishing developemnt
+                    // TODO, remove after finishing development
                     System.out.println(lang + streamTopKs.get(lang).topk());
                 }
                 writeToFiles(outputFolder, mode, dataToWrite, Bytes.toString(startTsBytes), Bytes.toString(endTsBytes));
@@ -229,9 +243,11 @@ public class TwitterStats {
         }
         else if(mode.equals("4") && args.length >= 3) {//mode 4, create the table
             String zkHost = args[1];
+            // TODO, remove after finishing development
             System.out.println("zkHost:" + zkHost);
 
             String dataFolder = args[2];
+            // TODO, remove after finishing development
             System.out.println("dataFolder:" + dataFolder);
 
             Path dataFolderPath = FileSystems.getDefault().getPath(dataFolder);
@@ -307,12 +323,9 @@ public class TwitterStats {
                 // In this snippet, it can only be thrown by newDirectoryStream.
                 System.err.println(e);
             }
-
         }
         else {
             System.out.println("The value of mode is not valid. Valida values are from 1 to 4.");
         }
-
     }
-
 }
