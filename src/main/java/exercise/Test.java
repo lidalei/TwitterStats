@@ -1,3 +1,5 @@
+package exercise;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.*;
@@ -182,11 +184,5 @@ public class Test {
              }
 
         }
-
-
-
     }
-
-
-
 }

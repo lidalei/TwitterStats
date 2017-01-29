@@ -1,3 +1,5 @@
+package exercise;
+
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
