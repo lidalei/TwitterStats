@@ -184,6 +184,7 @@ public class TwitterStats {
 
             try{
                 HConnection conn = HConnectionManager.createConnection(CONFIGURATION);
+
                 HTable table = new HTable(TableName.valueOf(TABLE_NAME_BYTES), conn);
 
                 try{
@@ -282,7 +283,7 @@ public class TwitterStats {
             // add data, store top 3 hashtags into different columns of a column family (language).
             // In fact, storing them as different versions might be a good idea. Let's stick to this now.
             // TODO, parallel reads.
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataFolderPath, "*.log")) {
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataFolderPath, DATA_GLOB)) {
                 HConnection conn = HConnectionManager.createConnection(CONFIGURATION);
                 HTable table = new HTable(TableName.valueOf(TABLE_NAME_BYTES), conn);
 
@@ -325,7 +326,7 @@ public class TwitterStats {
             }
         }
         else {
-            System.out.println("The value of mode is not valid. Valida values are from 1 to 4.");
+            System.out.println("The value of mode is not valid (Valid values are from 1 to 4) or there are missing arguments.");
         }
     }
 }
