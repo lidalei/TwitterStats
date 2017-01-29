@@ -28,6 +28,8 @@ public class TwitterStats {
     // TODO, change to out
     private static final String DATA_GLOB = "*.log";
 
+    private static final String[] ALL_LANGUAE_LIST = {"all"};
+
     private static final byte[] TOP_HASH_TAG1_BYTES = Bytes.toBytes("topHashTag1");
     private static final byte[] TOP_HASH_TAG2_BYTES = Bytes.toBytes("topHashTag2");
     private static final byte[] TOP_HASH_TAG3_BYTES = Bytes.toBytes("topHashTag3");
@@ -64,16 +66,10 @@ public class TwitterStats {
     }
 
 
-    private static String getOutputFileName(String language, String queryMode) {
+    private static String getOutputFileName(String queryMode) {
         return "21_query" + queryMode + ".out";
     }
 
-
-    /**
-     * Write top N hashtags to files
-     * @param outputFolder, output folder String
-     * @param langHashtagFreqMap, lang maps to top N hashtag and frequency
-     */
 
     /**
      *
@@ -85,8 +81,6 @@ public class TwitterStats {
      * @param endTs
      */
     private static void writeToFiles(String outputFolder, String queryMode, HashMap<String, List<Entry<String, Integer>>> langHashtagFreqMap, String startTs, String endTs) {
-
-        HashMap<String, BufferedWriter> resWriters = new HashMap<>(8);
         try{
             // create if the output folder does not exist
             Path outputFolderPath = FileSystems.getDefault().getPath(outputFolder);
@@ -94,27 +88,28 @@ public class TwitterStats {
                 Files.createDirectory(outputFolderPath);
             }
 
-            // create files and write content
-            for(String lang : langHashtagFreqMap.keySet()) {
-                Path resFilePath = FileSystems.getDefault().getPath(outputFolder, getOutputFileName(lang, queryMode));
-                resWriters.put(lang, Files.newBufferedWriter(resFilePath, StandardCharsets.UTF_8, StandardOpenOption.CREATE,
-                        StandardOpenOption.APPEND, StandardOpenOption.WRITE));
+            // create file
+            Path resFilePath = FileSystems.getDefault().getPath(outputFolder, getOutputFileName(queryMode));
+            BufferedWriter resWriter = Files.newBufferedWriter(resFilePath, StandardCharsets.UTF_8, StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND, StandardOpenOption.WRITE);
 
+            // write content
+            for(String lang : langHashtagFreqMap.keySet()) {
                 List<Entry<String, Integer>> topK = langHashtagFreqMap.get(lang);
                 StringBuilder strBuilder = new StringBuilder(topK.size() * 40);
-                strBuilder.append(lang + ",");
+                if(!queryMode.equals("3")) {
+                    strBuilder.append(lang + ",");
+                }
 
                 for(int i = 1; i <= topK.size(); ++i) {
                     strBuilder.append(i + "," + topK.get(i - 1).getKey() + ",");
                 }
                 strBuilder.append(startTs + ",").append(endTs);
-                resWriters.get(lang).write(strBuilder.toString());
-                resWriters.get(lang).newLine();
+                resWriter.write(strBuilder.toString());
+                resWriter.newLine();
             }
 
-            for(BufferedWriter bufferedWriter : resWriters.values()) {
-                bufferedWriter.close();
-            }
+            resWriter.close();
         }
         catch (FileNotFoundException e) {
             e.printStackTrace();
@@ -139,11 +134,13 @@ public class TwitterStats {
 
         String mode = args[0];
 
-        // mode 1, given time interval and language, find top N most used words
-        // mode 2, given time interval and a list of languages, find top N words for each language
-        if((mode.equals("1") || mode.equals("2")) && args.length >= 7) {
+        // mode 1, given time interval and language, find top N most used words.
+        // mode 2, given time interval and a list of languages, find top N words for each language.
+        // mode 3, given time interval, find top N words among all languages.
+        if(((mode.equals("1") || mode.equals("2")) && args.length >= 7) || (mode.equals("3") && args.length >= 6)) {
             String zkHost = args[1];
             System.out.println("zkHost:" + zkHost);
+            // TODO, use zkHost
 
             byte[] startTsBytes = Bytes.toBytes(args[2]);
             System.out.println("startTimestamp:" + new String(startTsBytes, StandardCharsets.UTF_8));
@@ -151,11 +148,15 @@ public class TwitterStats {
             byte[] endTsBytes = Bytes.toBytes(args[3]);
             System.out.println("endTimestamp:" + new String(endTsBytes, StandardCharsets.UTF_8));
 
+            if(Bytes.toString(startTsBytes).compareTo(Bytes.toString(endTsBytes)) > 0) {
+                System.out.println("Star time cannot be later than end time.");
+                return;
+            }
+
             final int n = Integer.valueOf(args[4]);
             System.out.println("n:" + n);
 
-
-            String[] langList = args[5].split(",");
+            String[] langList = mode.equals("3") ? ALL_LANGUAE_LIST : args[5].split(",");
 
             // transform to List of byte[]
             ArrayList<byte[]> langBytesList = new ArrayList<>(langList.length);
@@ -170,7 +171,7 @@ public class TwitterStats {
                 System.out.println(Bytes.toString(langBytes));
             }
 
-            String outputFolder = args[6];
+            String outputFolder = mode.equals("3") ? args[5] : args[6];
             System.out.println("outputFolder:" + outputFolder);
 
             try{
@@ -179,8 +180,10 @@ public class TwitterStats {
 
                 Scan scan = new Scan(startTsBytes, endTsBytes);
 
-                for(byte[] langBytes : langBytesList) {
-                    scan.addFamily(langBytes);
+                if(!mode.equals("3")) {
+                    for(byte[] langBytes : langBytesList) {
+                        scan.addFamily(langBytes);
+                    }
                 }
 
                 ResultScanner resScanner = table.getScanner(scan);
@@ -197,7 +200,8 @@ public class TwitterStats {
                                     // transform to string first and get int value later to avoid IllegalArgumentException
                                     int freq = Integer.valueOf(Bytes.toString(cfColValMap.get(langBytes).get(topHashTagFreqBytes(i + 1))));
 
-                                    streamTopKs.get(Bytes.toString(langBytes)).add(hashtag, freq);
+                                    StreamTopK streamTopK = mode.equals("3") ? streamTopKs.get(ALL_LANGUAE_LIST[0]) : streamTopKs.get(Bytes.toString(langBytes));
+                                    streamTopK.add(hashtag, freq);
                                 }
                             }
                         }
@@ -211,6 +215,9 @@ public class TwitterStats {
                 HashMap<String, List<Entry<String, Integer>>> dataToWrite = new HashMap<>(langList.length * 2);
                 for(String lang : streamTopKs.keySet()) {
                     dataToWrite.put(lang, streamTopKs.get(lang).topk());
+
+                    // TODO, remove after finishing developemnt
+                    System.out.println(lang + streamTopKs.get(lang).topk());
                 }
                 writeToFiles(outputFolder, mode, dataToWrite, Bytes.toString(startTsBytes), Bytes.toString(endTsBytes));
 
@@ -219,23 +226,6 @@ public class TwitterStats {
             catch (IOException e) {
                 System.out.println("IO error while creating a connection.");
             }
-        }
-        else if(mode.equals("3") && args.length >= 6) {//mode 3, given time interval, find top N words among all languages
-            String zkHost = args[1];
-            System.out.println("zkHost:" + zkHost);
-
-            String startTime = args[2];
-            System.out.println("startTime:" + startTime);
-
-            String endTime = args[3];
-            System.out.println("endTime:" + endTime);
-
-            final int n = Integer.valueOf(args[4]);
-            System.out.println("n:" + n);
-
-            String outputFolder = args[5];
-            System.out.println("outputFolder:" + outputFolder);
-
         }
         else if(mode.equals("4") && args.length >= 3) {//mode 4, create the table
             String zkHost = args[1];
