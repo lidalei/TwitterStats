@@ -8,11 +8,9 @@ import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Arrays;
+import java.nio.file.*;
+import java.util.*;
+import java.util.Map.Entry;
 
 
 /**
@@ -63,6 +61,68 @@ public class TwitterStats {
     }
 
 
+    private static String getOutputFileName(String language, String queryMode) {
+        return "21_query" + queryMode + ".out";
+    }
+
+
+    /**
+     * Write top N hashtags to files
+     * @param outputFolder, output folder String
+     * @param langHashtagFreqMap, lang maps to top N hashtag and frequency
+     */
+
+    /**
+     *
+     * Write top N hashtags to files
+     * @param outputFolder, output folder String
+     * @param queryMode
+     * @param langHashtagFreqMap, lang maps to top N hashtag and frequency
+     * @param startTs
+     * @param endTs
+     */
+    private static void writeToFiles(String outputFolder, String queryMode, HashMap<String, List<Entry<String, Integer>>> langHashtagFreqMap, String startTs, String endTs) {
+
+        HashMap<String, BufferedWriter> resWriters = new HashMap<>(8);
+        try{
+            // create if the output folder does not exist
+            Path outputFolderPath = FileSystems.getDefault().getPath(outputFolder);
+            if(!Files.isDirectory(outputFolderPath)) {
+                Files.createDirectory(outputFolderPath);
+            }
+
+            // create files and write content
+            for(String lang : langHashtagFreqMap.keySet()) {
+                Path resFilePath = FileSystems.getDefault().getPath(outputFolder, getOutputFileName(lang, queryMode));
+                resWriters.put(lang, Files.newBufferedWriter(resFilePath, StandardCharsets.UTF_8, StandardOpenOption.CREATE,
+                        StandardOpenOption.APPEND, StandardOpenOption.WRITE));
+
+                List<Entry<String, Integer>> topK = langHashtagFreqMap.get(lang);
+                StringBuilder strBuilder = new StringBuilder(topK.size() * 40);
+                strBuilder.append(lang + ",");
+
+                for(int i = 1; i <= topK.size(); ++i) {
+                    strBuilder.append(i + "," + topK.get(i - 1).getKey() + ",");
+                }
+                strBuilder.append(startTs + ",").append(endTs);
+                resWriters.get(lang).write(strBuilder.toString());
+                resWriters.get(lang).newLine();
+            }
+
+            for(BufferedWriter bufferedWriter : resWriters.values()) {
+                bufferedWriter.close();
+            }
+        }
+        catch (FileNotFoundException e) {
+            e.printStackTrace();
+            System.out.println("Fatal error: " + e.getMessage() + ". To terminate the program.");
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+            System.out.println("Fatal error: " + e.getMessage() + ". To terminate the program.");
+        }
+    }
+
 
     public static void main(String[] args) {
 
@@ -75,8 +135,10 @@ public class TwitterStats {
         }
 
         String mode = args[0];
-        if(mode.equals("1") && args.length >= 7) {// mode 1, given time interval and language, find top N most used words
 
+        // mode 1, given time interval and language, find top N most used words
+        // mode 2, given time interval and a list of languages, find top N words for each language
+        if((mode.equals("1") || mode.equals("2")) && args.length >= 7) {
             String zkHost = args[1];
             System.out.println("zkHost:" + zkHost);
 
@@ -89,13 +151,24 @@ public class TwitterStats {
             final int n = Integer.valueOf(args[4]);
             System.out.println("n:" + n);
 
-            byte[] langBytes = Bytes.toBytes(args[5]);
-            System.out.println("lang:" + new String(langBytes, StandardCharsets.UTF_8));
+
+            String[] langList = args[5].split(",");
+
+            // transform to List of byte[]
+            ArrayList<byte[]> langBytesList = new ArrayList<>(langList.length);
+            HashMap<String, StreamTopK> streamTopKs = new HashMap<>(langList.length * 2);
+            for(String lang : langList) {
+                langBytesList.add(Bytes.toBytes(lang));
+                streamTopKs.put(lang, new StreamTopK(n));
+            }
+
+            System.out.println("langList:");
+            for(byte[] langBytes : langBytesList) {
+                System.out.println(Bytes.toString(langBytes));
+            }
 
             String outputFolder = args[6];
             System.out.println("outputFolder:" + outputFolder);
-
-            StreamTopK streamTopK = new StreamTopK(n, 10000);
 
             try{
                 HConnection conn = HConnectionManager.createConnection(CONFIGURATION);
@@ -103,49 +176,46 @@ public class TwitterStats {
 
                 Scan scan = new Scan(startTsBytes, endTsBytes);
 
-                scan.addFamily(langBytes);
+                for(byte[] langBytes : langBytesList) {
+                    scan.addFamily(langBytes);
+                }
 
                 ResultScanner resScanner = table.getScanner(scan);
 
                 try{
-                    // TODO, deal with hashtags
                     for(Result res : resScanner) {
-                        // System.out.println("row: " + res);
-                        res.getMap();
+                        NavigableMap<byte[], NavigableMap<byte[], byte[]>> cfColValMap = res.getNoVersionMap();
+
+                        Set<byte[]> langBytesSet = cfColValMap.keySet();
+                        for(byte[] langBytes : langBytesSet) {
+                            for(int i = 0; i < 3; ++i) {
+                                String hashtag = Bytes.toString(cfColValMap.get(langBytes).get(topHashTagBytes(i + 1)));
+                                if(hashtag != null) {
+                                    // transform to string first and get int value later to avoid IllegalArgumentException
+                                    int freq = Integer.valueOf(Bytes.toString(cfColValMap.get(langBytes).get(topHashTagFreqBytes(i + 1))));
+
+                                    streamTopKs.get(Bytes.toString(langBytes)).add(hashtag, freq);
+                                }
+                            }
+                        }
                     }
                 }
                 finally {
                     resScanner.close();
                 }
 
-                conn.close();
+                // write to files
+                HashMap<String, List<Entry<String, Integer>>> dataToWrite = new HashMap<>(langList.length * 2);
+                for(String lang : streamTopKs.keySet()) {
+                    dataToWrite.put(lang, streamTopKs.get(lang).topk());
+                }
+                writeToFiles(outputFolder, mode, dataToWrite, Bytes.toString(startTsBytes), Bytes.toString(endTsBytes));
 
+                conn.close();
             }
             catch (IOException e) {
                 System.out.println("IO error while creating a connection.");
             }
-
-
-        }
-        else if(mode.equals("2") && args.length >= 7) {// mode 2, given time interval and a list of languages, find top N words for each language
-            String zkHost = args[1];
-            System.out.println("zkHost:" + zkHost);
-
-            String startTime = args[2];
-            System.out.println("startTime:" + startTime);
-
-            String endTime = args[3];
-            System.out.println("endTime:" + endTime);
-
-            final int n = Integer.valueOf(args[4]);
-            System.out.println("n:" + n);
-
-            String[] langList = args[5].split(",");
-            System.out.println("langList:" + Arrays.toString(langList));
-
-            String outputFolder = args[6];
-            System.out.println("outputFolder:" + outputFolder);
-
         }
         else if(mode.equals("3") && args.length >= 6) {//mode 3, given time interval, find top N words among all languages
             String zkHost = args[1];
