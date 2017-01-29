@@ -25,6 +25,9 @@ public class TwitterStats {
 
     private static final HTableDescriptor TABLE_DESCRIPTOR = new HTableDescriptor(TableName.valueOf(TABLE_NAME_BYTES));
 
+    // TODO, change to out
+    private static final String DATA_GLOB = "*.log";
+
     private static final byte[] TOP_HASH_TAG1_BYTES = Bytes.toBytes("topHashTag1");
     private static final byte[] TOP_HASH_TAG2_BYTES = Bytes.toBytes("topHashTag2");
     private static final byte[] TOP_HASH_TAG3_BYTES = Bytes.toBytes("topHashTag3");
@@ -244,7 +247,7 @@ public class TwitterStats {
             Path dataFolderPath = FileSystems.getDefault().getPath(dataFolder);
 
             // Create schema, https://docs.oracle.com/javase/tutorial/essential/io/dirs.html#listdir
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataFolderPath, "*.log")) {
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataFolderPath, DATA_GLOB)) {
                 HBaseAdmin admin = new HBaseAdmin(CONFIGURATION);
 
                 for (Path entry: stream) {
