@@ -19,7 +19,7 @@ import java.util.Map.Entry;
 public class TwitterStats {
 
     // connect to HBase server and create a table
-    private static final Configuration CONFIGURATION = HBaseConfiguration.create();
+    private static Configuration conf = HBaseConfiguration.create();
 
     private static final byte[] TABLE_NAME_BYTES = Bytes.toBytes("twitterStats");
 
@@ -143,7 +143,9 @@ public class TwitterStats {
             String zkHost = args[1];
             // TODO, remove after finishing development
             System.out.println("zkHost:" + zkHost);
-            // TODO, use zkHost
+
+            conf.set("hbase.zookeeper.quorum", zkHost.split(":")[0]);
+            conf.set("hbase.zookeeper.property.clientPort", zkHost.split(":")[1]);
 
             byte[] startTsBytes = Bytes.toBytes(args[2]);
             // TODO, remove after finishing development
@@ -159,7 +161,6 @@ public class TwitterStats {
             }
 
             final int n = Integer.valueOf(args[4]);
-            // TODO, remove after finishing development
             System.out.println("n:" + n);
 
             String[] langList = mode.equals("3") ? ALL_LANGUAGE_LIST : args[5].split(",");
@@ -172,18 +173,16 @@ public class TwitterStats {
                 streamTopKs.put(lang, new StreamTopK(n));
             }
 
-            // TODO, remove after finishing development
             System.out.println("langList:");
             for(byte[] langBytes : langBytesList) {
                 System.out.println(Bytes.toString(langBytes));
             }
 
             String outputFolder = mode.equals("3") ? args[5] : args[6];
-            // TODO, remove after finishing development
             System.out.println("outputFolder:" + outputFolder);
 
             try{
-                HConnection conn = HConnectionManager.createConnection(CONFIGURATION);
+                HConnection conn = HConnectionManager.createConnection(conf);
 
                 HTable table = new HTable(TableName.valueOf(TABLE_NAME_BYTES), conn);
 
@@ -231,8 +230,7 @@ public class TwitterStats {
                 for(String lang : streamTopKs.keySet()) {
                     dataToWrite.put(lang, streamTopKs.get(lang).topk());
 
-                    // TODO, remove after finishing development
-                    System.out.println(lang + streamTopKs.get(lang).topk());
+//                    System.out.println(lang + streamTopKs.get(lang).topk());
                 }
                 writeToFiles(outputFolder, mode, dataToWrite, Bytes.toString(startTsBytes), Bytes.toString(endTsBytes));
 
@@ -244,18 +242,19 @@ public class TwitterStats {
         }
         else if(mode.equals("4") && args.length >= 3) {//mode 4, create the table
             String zkHost = args[1];
-            // TODO, remove after finishing development
             System.out.println("zkHost:" + zkHost);
 
+            conf.set("hbase.zookeeper.quorum", zkHost.split(":")[0]);
+            conf.set("hbase.zookeeper.property.clientPort", zkHost.split(":")[1]);
+
             String dataFolder = args[2];
-            // TODO, remove after finishing development
             System.out.println("dataFolder:" + dataFolder);
 
             Path dataFolderPath = FileSystems.getDefault().getPath(dataFolder);
 
             // Create schema, https://docs.oracle.com/javase/tutorial/essential/io/dirs.html#listdir
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataFolderPath, DATA_GLOB)) {
-                HBaseAdmin admin = new HBaseAdmin(CONFIGURATION);
+                HBaseAdmin admin = new HBaseAdmin(conf);
 
                 for (Path entry: stream) {
                     String fileName = entry.getFileName().toString();
@@ -284,7 +283,7 @@ public class TwitterStats {
             // In fact, storing them as different versions might be a good idea. Let's stick to this now.
             // TODO, parallel reads.
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataFolderPath, DATA_GLOB)) {
-                HConnection conn = HConnectionManager.createConnection(CONFIGURATION);
+                HConnection conn = HConnectionManager.createConnection(conf);
                 HTable table = new HTable(TableName.valueOf(TABLE_NAME_BYTES), conn);
 
                 for (Path entry: stream) {
